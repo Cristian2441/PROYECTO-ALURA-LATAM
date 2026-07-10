@@ -1,0 +1,314 @@
+$blue-primary:    #1a3a8f;
+$blue-mid:        #1e4fc8;
+$blue-light:      #3b6cf8;
+$blue-card-icon:  #2c52b8;
+$gray-text:       #5a6478;
+$gray-subtle:     #8a95ad;
+$white:           #ffffff;
+$card-shadow:     0 2px 12px rgba(26, 58, 143, 0.09);
+$card-shadow-hover: 0 6px 24px rgba(26, 58, 143, 0.18);
+
+.chat-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  position: relative;
+  overflow: hidden;
+}
+
+// ══════════════════════════════════════════════
+// TOPBAR (Alura + Oracle Logo)
+// ══════════════════════════════════════════════
+.topbar {
+  position: absolute;
+  top: 1.5rem;
+  left: 1.5rem;
+  z-index: 10;
+}
+
+.alura-logo {
+  height: clamp(50px, 8vw, 80px);
+  width: auto;
+  max-width: 100%;
+  opacity: 0.9;
+  transition: opacity 0.2s ease;
+
+  &:hover {
+    opacity: 1;
+  }
+}
+
+// ══════════════════════════════════════════════
+// VISTA BIENVENIDA
+// ══════════════════════════════════════════════
+.welcome-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.5rem 8rem;
+  text-align: center;
+  animation: fadeInUp 0.5s ease-out;
+}
+
+.logo-wrapper {
+  margin-bottom: 1.5rem;
+}
+
+.sega-logo-img {
+  width: auto;
+  height: clamp(70px, 15vw, 120px);
+  max-width: 100%;
+  display: block;
+  filter: drop-shadow(0 4px 8px rgba(26, 58, 143, 0.15));
+  transition: transform 0.2s ease, filter 0.2s ease;
+
+  &:hover {
+    transform: translateY(-2px) scale(1.02);
+    filter: drop-shadow(0 6px 12px rgba(26, 58, 143, 0.25));
+  }
+
+  &--small {
+    height: clamp(20px, 4vw, 28px);
+    filter: drop-shadow(0 2px 4px rgba(26, 58, 143, 0.1));
+
+    &:hover {
+      transform: none;
+      filter: drop-shadow(0 2px 4px rgba(26, 58, 143, 0.1));
+    }
+  }
+}
+
+.welcome-title {
+  font-size: clamp(1.6rem, 4vw, 2.2rem);
+  font-weight: 800;
+  color: #0d1b3e;
+  line-height: 1.2;
+  margin-bottom: 0.75rem;
+  letter-spacing: -0.02em;
+}
+
+.welcome-subtitle {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: $blue-mid;
+  max-width: 460px;
+  line-height: 1.5;
+  margin-bottom: 2.5rem;
+  opacity: 0.85;
+}
+
+// ══════════════════════════════════════════════
+// VISTA CHAT
+// ══════════════════════════════════════════════
+.chat-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(26, 58, 143, 0.08);
+  box-shadow: 0 1px 8px rgba(26, 58, 143, 0.06);
+}
+
+.chat-header-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.chat-header-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0d1b3e;
+  letter-spacing: -0.01em;
+}
+
+.new-chat-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  background: rgba(26, 58, 143, 0.08);
+  border: 1px solid rgba(26, 58, 143, 0.15);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: $blue-primary;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  &:hover {
+    background: rgba(26, 58, 143, 0.14);
+    transform: translateY(-1px);
+  }
+}
+
+.messages-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.messages-empty-hint {
+  color: $gray-subtle;
+  font-size: 0.875rem;
+  text-align: center;
+  margin: auto;
+  font-style: italic;
+}
+
+// ══════════════════════════════════════════════
+// BARRA DE INPUT
+// ══════════════════════════════════════════════
+.input-area {
+  padding: 1rem 1.5rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.input-container {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  width: 100%;
+  max-width: 720px;
+  background: $white;
+  border: 1.5px solid rgba(26, 58, 143, 0.12);
+  border-radius: 20px;
+  padding: 0.75rem 0.75rem 0.75rem 1.25rem;
+  box-shadow:
+    0 4px 20px rgba(26, 58, 143, 0.1),
+    0 1px 6px rgba(26, 58, 143, 0.06);
+  transition: border-color 0.2s, box-shadow 0.2s;
+
+  &:focus-within {
+    border-color: rgba(26, 58, 143, 0.35);
+    box-shadow:
+      0 6px 28px rgba(26, 58, 143, 0.14),
+      0 2px 8px rgba(26, 58, 143, 0.08);
+  }
+}
+
+.message-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.95rem;
+  color: #0d1b3e;
+  resize: none;
+  line-height: 1.5;
+  max-height: 140px;
+  overflow-y: auto;
+
+  &::placeholder {
+    color: $gray-subtle;
+  }
+}
+
+.send-btn {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: 12px;
+  background: rgba(26, 58, 143, 0.12);
+  color: $gray-subtle;
+  cursor: not-allowed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    transform 0.15s ease,
+    box-shadow 0.2s ease;
+
+  svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  &--active {
+    background: linear-gradient(135deg, #1a3a8f 0%, #1e4fc8 100%);
+    color: $white;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(26, 58, 143, 0.35);
+
+    &:hover {
+      transform: translateY(-1px) scale(1.05);
+      box-shadow: 0 6px 18px rgba(26, 58, 143, 0.45);
+    }
+
+    &:active {
+      transform: scale(0.97);
+    }
+  }
+}
+
+.disclaimer {
+  font-size: 0.73rem;
+  color: $gray-subtle;
+  text-align: center;
+  opacity: 0.8;
+}
+
+// ══════════════════════════════════════════════
+// ANIMACIONES
+// ══════════════════════════════════════════════
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+// ══════════════════════════════════════════════
+// RESPONSIVE
+// ══════════════════════════════════════════════
+@media (max-width: 600px) {
+  .welcome-title {
+    font-size: 1.5rem;
+  }
+
+  .input-area {
+    padding: 0.75rem 1rem 1rem;
+  }
+
+  .chat-header {
+    padding: 0.75rem 1rem;
+  }
+}

@@ -1,0 +1,110 @@
+<div class="chat-shell">
+
+  <!-- ══════════════════════════════════════
+       LOGO ALURA + ORACLE
+       ══════════════════════════════════════ -->
+  <div class="topbar">
+    <a href="https://www.aluracursos.com/" target="_blank" rel="noopener noreferrer">
+      <img
+        src="aluraoracle-logo.png"
+        alt="Alura + Oracle"
+        class="alura-logo"
+        id="alura-oracle-logo"
+      />
+    </a>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       VISTA BIENVENIDA
+       ══════════════════════════════════════ -->
+  @if (viewState() === 'welcome') {
+    <main class="welcome-view" id="welcome-section">
+
+      <div class="logo-wrapper" aria-label="SEGA Assistant">
+        <a href="https://sega.com/homepage" target="_blank" rel="noopener noreferrer">
+          <img
+            src="SEGA-logo.png"
+            alt="SEGA"
+            class="sega-logo-img"
+            id="sega-logo"
+          />
+        </a>
+      </div>
+
+      <h1 class="welcome-title">¿En qué puedo ayudarte?</h1>
+
+      <p class="welcome-subtitle">
+        Consulta sobre cuentas SEGA, solución de problemas técnicos y cómo prepararte para recibir soporte
+      </p>
+
+    </main>
+  }
+
+  <!-- ══════════════════════════════════════
+       VISTA CHAT (preparada para conectar)
+       ══════════════════════════════════════ -->
+  @if (viewState() === 'chat') {
+    <div class="chat-view" id="chat-section">
+      <header class="chat-header">
+        <div class="chat-header-logo">
+          <a href="https://sega.com/homepage" target="_blank" rel="noopener noreferrer">
+            <img
+              src="SEGA-logo.png"
+              alt="SEGA"
+              class="sega-logo-img sega-logo-img--small"
+            />
+          </a>
+          <span class="chat-header-title">SEGA Assistant</span>
+        </div>
+        <button class="new-chat-btn" id="new-chat-button" (click)="viewState.set('welcome')" aria-label="Nueva conversación">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+          Nueva conversación
+        </button>
+      </header>
+
+      <div class="messages-area" id="messages-area" role="log" aria-live="polite">
+        <p class="messages-empty-hint">Los mensajes aparecerán aquí...</p>
+      </div>
+    </div>
+  }
+
+  <!-- ══════════════════════════════════════
+       BARRA DE INPUT (siempre visible)
+       ══════════════════════════════════════ -->
+  <footer class="input-area">
+    <div class="input-container">
+      <textarea
+        id="user-message-input"
+        class="message-input"
+        [placeholder]="inputPlaceholder"
+        [(ngModel)]="userMessage"
+        (keydown)="onKeyDown($event)"
+        rows="1"
+        aria-label="Escribe tu mensaje"
+        autocomplete="off"
+        spellcheck="true"
+      ></textarea>
+
+      <button
+        id="send-message-button"
+        class="send-btn"
+        [class.send-btn--active]="userMessage().trim().length > 0"
+        [disabled]="userMessage().trim().length === 0"
+        (click)="onSendMessage()"
+        aria-label="Enviar mensaje"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="22" y1="2" x2="11" y2="13"/>
+          <polygon points="22,2 15,22 11,13 2,9"/>
+        </svg>
+      </button>
+    </div>
+
+    <p class="disclaimer">
+      SEGA Assistant puede cometer errores. Verifica información importante.
+    </p>
+  </footer>
+
+</div>
