@@ -1,17 +1,15 @@
 <div class="chat-shell">
 
   <!-- ══════════════════════════════════════
-       LOGO ALURA + ORACLE
+       TOPBAR — Alura + Oracle Logo
        ══════════════════════════════════════ -->
   <div class="topbar">
-    <a href="https://www.aluracursos.com/" target="_blank" rel="noopener noreferrer">
-      <img
-        src="aluraoracle-logo.png"
-        alt="Alura + Oracle"
-        class="alura-logo"
-        id="alura-oracle-logo"
-      />
-    </a>
+    <img
+      src="aluraoracle-logo.png"
+      alt="Alura + Oracle"
+      class="alura-logo"
+      id="alura-oracle-logo"
+    />
   </div>
 
   <!-- ══════════════════════════════════════
@@ -19,53 +17,70 @@
        ══════════════════════════════════════ -->
   @if (viewState() === 'welcome') {
     <main class="welcome-view" id="welcome-section">
-
-      <div class="logo-wrapper" aria-label="SEGA Assistant">
-        <a href="https://sega.com/homepage" target="_blank" rel="noopener noreferrer">
-          <img
-            src="SEGA-logo.png"
-            alt="SEGA"
-            class="sega-logo-img"
-            id="sega-logo"
-          />
-        </a>
+      <div class="logo-wrapper">
+        <img src="SEGA-logo.png" alt="SEGA" class="sega-logo-img" id="sega-logo" />
       </div>
-
       <h1 class="welcome-title">¿En qué puedo ayudarte?</h1>
-
       <p class="welcome-subtitle">
-        Consulta sobre cuentas SEGA, solución de problemas técnicos y cómo prepararte para recibir soporte
+        Consulta sobre cuentas SEGA, solución de problemas técnicos
+        y cómo prepararte para recibir soporte
       </p>
-
     </main>
   }
 
   <!-- ══════════════════════════════════════
-       VISTA CHAT (preparada para conectar)
+       VISTA CHAT
        ══════════════════════════════════════ -->
   @if (viewState() === 'chat') {
     <div class="chat-view" id="chat-section">
-      <header class="chat-header">
-        <div class="chat-header-logo">
-          <a href="https://sega.com/homepage" target="_blank" rel="noopener noreferrer">
-            <img
-              src="SEGA-logo.png"
-              alt="SEGA"
-              class="sega-logo-img sega-logo-img--small"
-            />
-          </a>
-          <span class="chat-header-title">SEGA Assistant</span>
-        </div>
-        <button class="new-chat-btn" id="new-chat-button" (click)="viewState.set('welcome')" aria-label="Nueva conversación">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 5v14M5 12h14"/>
-          </svg>
-          Nueva conversación
-        </button>
-      </header>
 
+      <!-- Zona de mensajes (sin header) -->
       <div class="messages-area" id="messages-area" role="log" aria-live="polite">
-        <p class="messages-empty-hint">Los mensajes aparecerán aquí...</p>
+
+        @for (msg of mensajes(); track $index) {
+          <!-- Mensaje del USUARIO -->
+          @if (msg.rol === 'user') {
+            <div class="message message--user">
+              <div class="bubble bubble--user">
+                {{ msg.contenido }}
+              </div>
+            </div>
+          }
+
+          <!-- Mensaje del ASISTENTE -->
+          @if (msg.rol === 'assistant') {
+            <div class="message message--assistant">
+              <!-- Avatar -->
+              <div class="avatar" aria-hidden="true">
+                <img src="SEGA-logo.png" alt="" class="avatar-img" />
+              </div>
+
+              <div class="assistant-block">
+                <!-- Burbuja de respuesta -->
+                <div class="bubble bubble--assistant" [class.bubble--error]="msg.error">
+                  {{ msg.contenido }}
+                </div>
+              </div>
+            </div>
+          }
+        }
+
+        <!-- Indicador de escritura (loading) -->
+        @if (isLoading()) {
+          <div class="message message--assistant" id="typing-indicator">
+            <div class="avatar" aria-hidden="true">
+              <img src="SEGA-logo.png" alt="" class="avatar-img" />
+            </div>
+            <div class="bubble bubble--assistant bubble--typing">
+              <span class="dot"></span>
+              <span class="dot"></span>
+              <span class="dot"></span>
+            </div>
+          </div>
+        }
+
+        <!-- Ancla para auto-scroll -->
+        <div #messagesEnd></div>
       </div>
     </div>
   }
@@ -74,7 +89,23 @@
        BARRA DE INPUT (siempre visible)
        ══════════════════════════════════════ -->
   <footer class="input-area">
-    <div class="input-container">
+    <div class="input-container" [class.input-container--loading]="isLoading()">
+
+      <!-- Botón nueva conversación (+) -->
+      @if (viewState() === 'chat') {
+        <button
+          class="new-chat-icon-btn"
+          id="new-chat-button"
+          (click)="onNuevoChat()"
+          aria-label="Nueva conversación"
+          title="Nueva conversación"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+        </button>
+      }
+
       <textarea
         id="user-message-input"
         class="message-input"
@@ -82,6 +113,7 @@
         [(ngModel)]="userMessage"
         (keydown)="onKeyDown($event)"
         rows="1"
+        [disabled]="isLoading()"
         aria-label="Escribe tu mensaje"
         autocomplete="off"
         spellcheck="true"
@@ -90,15 +122,19 @@
       <button
         id="send-message-button"
         class="send-btn"
-        [class.send-btn--active]="userMessage().trim().length > 0"
-        [disabled]="userMessage().trim().length === 0"
+        [class.send-btn--active]="userMessage().trim().length > 0 && !isLoading()"
+        [disabled]="userMessage().trim().length === 0 || isLoading()"
         (click)="onSendMessage()"
         aria-label="Enviar mensaje"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="22" y1="2" x2="11" y2="13"/>
-          <polygon points="22,2 15,22 11,13 2,9"/>
-        </svg>
+        @if (isLoading()) {
+          <span class="spinner" aria-hidden="true"></span>
+        } @else {
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22,2 15,22 11,13 2,9"/>
+          </svg>
+        }
       </button>
     </div>
 
