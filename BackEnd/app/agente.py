@@ -1,12 +1,17 @@
 import logging
-import json
-from typing import List
+#import json
+from typing import List, TypedDict, Dict
+import time
+#import threading
+import asyncio
 
+
+from google.api_core.exceptions import GoogleAPIError, ResourceExhausted
 from langchain_core.documents import Document
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+#from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.config import (
@@ -16,12 +21,19 @@ from app.config import (
     LLM_MAX_TOKENS,
     HISTORY_FILE_PATH,
 )
-from app.prompts import ERROR_MESSAGE
+from app.prompts import ERROR_MESSAGE, NO_CONTEXT_MESSAGE
 from app.vectorStore import VectorStoreManager
 
 logger = logging.getLogger(__name__)
 
 MAX_HISTORY_TURNS = 5
+MAX_PREGUNTA_LENGTH = 500
+SESSION_TTL_SECONDS = 3600 
+CLEANUP_INTERVAL_SECONDS = 600
+
+class SessionData(TypedDict):
+    messages: List
+    last_access: float
 
 def _format_docs(docs: List[Document]) -> str:
     """Convierte una lista de documentos en texto para el contexto del prompt."""
@@ -41,22 +53,35 @@ class AgenteRAG:
     3. Se construye el prompt con el contexto recuperado + historial
     4. Gemini 1.5 Pro genera la respuesta en español
     5. Se devuelve la respuesta con las fuentes utilizadas
+    Evita el uso excesivo de formato markdown.** No uses negritas (**texto**) 
+en exceso ni anidés múltiples niveles de listas. Preferí oraciones claras y, 
+cuando haya pasos, una lista simple con números, sin sub-viñetas dentro de 
+cada paso.
+
+    Nota de escalabilidad: el historial vive en memoria del proceso (Dict).
+    Si el servicio corre con múltiples workers (Gunicorn/Uvicorn con --workers > 1)
+    o múltiples instancias en OCI, cada proceso tendrá su propio historial
+    desincronizado. Para ese escenario, reemplazar self._historiales por un
+    backend compartido (Redis) — ver notas al final del archivo.
     """
 
     def __init__(self, vector_store_manager: VectorStoreManager):
         self._vsm = vector_store_manager
         self._llm: ChatGoogleGenerativeAI | None = None
-        self._chain = None
-        self._historial: List = []  
+        self._prompt: ChatPromptTemplate | None = None
+        self._historiales: Dict[str, SessionData] = {}
         self._initialized = False
+        self._cleanup_lock = asyncio.Lock()
+        self._cleanup_task: asyncio.Task | None = None
 
     # ─────────────────────────────────────────────
     # Inicialización del agente
     # ─────────────────────────────────────────────
-    def initialize(self) -> None:
-        """Construye la cadena RAG con LCEL (LangChain 1.x)."""
-        logger.info(" Inicializando agente RAG con Gemini 1.5 Pro...")
+    async def initialize(self) -> None:
+        """Construye los componentes base de la cadena RAG con LCEL."""
+        logger.info(f"Inicializando agente RAG con modelo {LLM_MODEL}...")
 
+ 
         self._llm = ChatGoogleGenerativeAI(
             model=LLM_MODEL,
             google_api_key=GEMINI_API_KEY,
@@ -67,135 +92,174 @@ class AgenteRAG:
             (
                 "system",
                 """Eres un asistente virtual especializado en soporte técnico de SEGA.
-    Tu función es ayudar a los usuarios respondiendo sus preguntas basándote ÚNICAMENTE 
-    en la documentación oficial de SEGA que tienes disponible.
-
-    ## Reglas que DEBES seguir:
-
-    1. **Solo usa la información del contexto proporcionado.** No inventes respuestas 
-    ni uses conocimiento externo.
-
-    2. **Si la información no está en los documentos**, responde:
-    "Lo siento, no encontré información sobre eso en la documentación de soporte 
-    de SEGA. Te recomiendo contactar directamente al equipo de soporte oficial."
-
-    3. **Responde siempre en español**, de forma clara, amable y profesional.
-
-    4. **Sé conciso pero completo.** Si hay pasos a seguir, enuméralos claramente.
-
-    5. **No menciones que eres una IA** ni que estás "consultando documentos". 
-    Responde de manera natural como un agente de soporte.
-
-## Contexto de los documentos:
-{context}""",
+                    Tu función es ayudar a los usuarios respondiendo sus preguntas basándote ÚNICAMENTE
+                    en la documentación oficial de SEGA que tienes disponible.
+                    
+                    ## Reglas que DEBES seguir:
+                    
+                    1. **Solo usa la información del contexto proporcionado.** No inventes respuestas
+                    ni uses conocimiento externo.
+                    
+                    2. **Si el contexto está vacío o no contiene información relevante para la pregunta**,
+                    responde INMEDIATAMENTE y únicamente con:
+                    "Lo siento, no encontré información sobre eso en la documentación de soporte
+                    de SEGA. Te recomiendo contactar directamente al equipo de soporte oficial."
+                    No intentes completar la respuesta con conocimiento propio en ese caso.
+                    
+                    3. **Responde siempre en español**, de forma clara, amable y profesional.
+                    
+                    4. **Sé conciso pero completo.** Si hay pasos a seguir, enuméralos claramente.
+                    
+                    5. **No menciones que eres una IA** ni que estás "consultando documentos".
+                    Responde de manera natural como un agente de soporte.
+                    
+                    ## Contexto de los documentos:
+                    {context}""",
             ),
             MessagesPlaceholder(variable_name="historial"),
             ("human", "{pregunta}"),
         ])
-
-        self._load_historial()
         self._initialized = True
+        self._start_background_cleanup()
         logger.info("Agente RAG inicializado correctamente")
+
+    async def shutdown(self) -> None:
+        """
+        Detiene ordenadamente la tarea de limpieza en background.
+        Llamar desde el evento 'shutdown' de FastAPI.
+        """
+        if self._cleanup_task is not None and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("Tarea de limpieza de sesiones cancelada correctamente")
 
     # ─────────────────────────────────────────────
     # Persistencia de Historial
     # ─────────────────────────────────────────────
-    def _save_historial(self) -> None:
-        """Guarda el historial de conversación en un archivo JSON."""
-        try:
-            # Mantener solo los últimos MAX_HISTORY_TURNS
-            historial_reducido = self._historial[-MAX_HISTORY_TURNS * 2:]
-            self._historial = historial_reducido
 
-            datos = []
-            for msg in self._historial:
-                tipo = "human" if isinstance(msg, HumanMessage) else "ai"
-                datos.append({"type": tipo, "content": msg.content})
+    async def _get_session_history(self, session_id: str) -> List:
+        """Obtiene y limita el historial específico de una sesión."""
+        async with self._cleanup_lock:
+            if session_id not in self._historiales:
+                self._historiales[session_id] = {"messages": [], "last_access": time.time()}
+                
+            self._historiales[session_id]["last_access"] = time.time()
+            return self._historiales[session_id]["messages"][-MAX_HISTORY_TURNS * 2:]
 
-            with open(HISTORY_FILE_PATH, "w", encoding="utf-8") as f:
-                json.dump(datos, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"Error guardando historial: {e}")
+    async def _save_session_historial(self, session_id: str, pregunta: str, respuesta: str) -> None:
+        """Guarda la interacción en la sesión y recorta el exceso de memoria de forma segura."""
+        if self._cleanup_lock is not None:
+            async with self._cleanup_lock:
+                if session_id not in self._historiales:
+                    self._historiales[session_id] = {"messages": [], "last_access": time.time()}
 
-    def _load_historial(self) -> None:
-        """Carga el historial de conversación desde un archivo JSON."""
-        self._historial = []
-        if not HISTORY_FILE_PATH.exists():
-            return
-
-        try:
-            with open(HISTORY_FILE_PATH, "r", encoding="utf-8") as f:
-                datos = json.load(f)
+                session = self._historiales[session_id]
+                session["messages"].append(HumanMessage(content=pregunta))
+                session["messages"].append(AIMessage(content=respuesta))
+                session["last_access"] = time.time()
             
-            for item in datos:
-                if item["type"] == "human":
-                    self._historial.append(HumanMessage(content=item["content"]))
-                elif item["type"] == "ai":
-                    self._historial.append(AIMessage(content=item["content"]))
-            logger.info(f"Historial cargado: {len(self._historial)} mensajes")
-        except Exception as e:
-            logger.error(f"Error cargando historial: {e}")
+                if len(session["messages"]) > MAX_HISTORY_TURNS * 2:
+                    session["messages"] = session["messages"][-MAX_HISTORY_TURNS * 2:]
+
+    def _start_background_cleanup(self) -> None:
+        """Lanza un demonio que limpia la RAM de forma asíncrona cada cierto intervalo."""
+        async def cleanup_loop():
+            while True:
+                await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
+                ahora = time.time()
+                async with self._cleanup_lock:
+                    expiradas = [
+                        sid for sid, data in self._historiales.items()
+                        if ahora - data["last_access"] > SESSION_TTL_SECONDS
+                    ]
+                    for sid in expiradas:
+                        del self._historiales[sid]
+                if expiradas:
+                    logger.info(f"Recolector de basura: {len(expiradas)} sesiones inactivas eliminadas de la RAM.")
+
+        self._cleanup_task = asyncio.create_task(cleanup_loop())
+
 
     # ─────────────────────────────────────────────
     # Método principal de chat
     # ─────────────────────────────────────────────
-    def chat(self, pregunta: str) -> dict:
+    async def chat(self, pregunta: str, session_id: str) -> dict:
         """
-        Procesa una pregunta del usuario y devuelve la respuesta del agente.
-
+        Procesa de forma asíncrona una pregunta aislada por ID de sesión.
+ 
         Args:
-            pregunta: La pregunta del usuario en lenguaje natural
-
+            pregunta: La consulta del usuario.
+            session_id: Identificador único del usuario o chat.
+ 
         Returns:
             dict con 'respuesta' (str) y 'fuentes' (list[str])
         """
-        if not self._initialized or self._llm is None:
+        if not self._initialized or self._llm is None or self._prompt is None:
             raise RuntimeError(
                 "El agente no está inicializado. Llama a initialize() primero."
             )
 
         if not pregunta.strip():
             return {"respuesta": "Por favor, escribe tu pregunta.", "fuentes": []}
+        
+        if len(pregunta) > MAX_PREGUNTA_LENGTH:
+            return {
+                "respuesta": f"Tu pregunta es muy larga (máximo {MAX_PREGUNTA_LENGTH} caracteres). Intenta ser más breve.",
+                "fuentes": []
+             }
 
         try:
-            logger.info(f"💬 Procesando pregunta: {pregunta[:80]}...")
+            logger.info(f"Procesando pregunta: {pregunta[:50]}...")
 
             retriever = self._vsm.get_retriever()
-            docs = retriever.invoke(pregunta)
+            docs = await retriever.ainvoke(pregunta)
+
+            if not docs:
+                return {"respuesta": NO_CONTEXT_MESSAGE, "fuentes": []}
             contexto = _format_docs(docs)
+
+            historial_usuario = await self._get_session_history(session_id)
 
             cadena = self._prompt | self._llm | StrOutputParser()
 
-            respuesta = cadena.invoke({
+            respuesta = await cadena.ainvoke({
                 "context": contexto,
-                "historial": self._historial[-MAX_HISTORY_TURNS * 2:],
+                "historial": historial_usuario,
                 "pregunta": pregunta,
             })
 
-            self._historial.append(HumanMessage(content=pregunta))
-            self._historial.append(AIMessage(content=respuesta))
-            self._save_historial()
+            await self._save_session_historial(session_id, pregunta, respuesta)
 
             fuentes = list({
                 doc.metadata.get("fuente", "Documento desconocido")
                 for doc in docs
             })
 
-            logger.info(f"Respuesta generada — Fuentes: {fuentes}")
             return {"respuesta": respuesta, "fuentes": fuentes}
 
+        except ResourceExhausted as e:
+            logger.error(f"Cuota de la API de Gemini excedida: {e}")
+            return {"respuesta": "Se alcanzó el límite de uso del servicio. Intenta en unos minutos.", "fuentes": []}
+        except GoogleAPIError as e:
+            logger.error(f"Error de la API de Gemini: {e}")
+            return {"respuesta": ERROR_MESSAGE, "fuentes": []}
         except Exception as e:
-            logger.error(f"Error al procesar pregunta: {e}", exc_info=True)
+            logger.error(f"Error inesperado al procesar pregunta: {e}", exc_info=True)
             return {"respuesta": ERROR_MESSAGE, "fuentes": []}
 
     # ─────────────────────────────────────────────
     # Limpiar historial de conversación
     # ─────────────────────────────────────────────
-    def reset_historial(self) -> None:
-        """Limpia el historial de conversación en memoria y en disco."""
-        self._historial.clear()
-        self._save_historial()
-        logger.info("Historial de conversación reiniciado")
+    async def reset_historial(self, session_id: str) -> None:
+        """Borra explícitamente una sesión de memoria usando exclusión mutua."""
+        async with self._cleanup_lock:
+            if session_id in self._historiales:
+                self._historiales[session_id]["messages"].clear()
+                del self._historiales[session_id]
+                logger.info(f"Historial de la sesión {session_id} reiniciado")
 
     # ─────────────────────────────────────────────
     # Estado del agente
