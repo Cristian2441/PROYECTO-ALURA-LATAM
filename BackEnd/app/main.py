@@ -1,11 +1,20 @@
 import logging
 import sys
+import asyncio
+from app.config import ADMIN_TOKEN
 from contextlib import asynccontextmanager
 
+import secrets
+import uuid
+
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from app.agente import AgenteRAG
 from app.prompts import WELCOME_MESSAGE
@@ -22,29 +31,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 # ─────────────────────────────────────────────
 # Instancias globales
 # ─────────────────────────────────────────────
 vsm = VectorStoreManager()
 agente = AgenteRAG(vsm)
 
+limiter = Limiter(key_func=get_remote_address)
 
 # ─────────────────────────────────────────────
 # Lifespan: startup y shutdown
 # ─────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Inicializa el vector store y el agente al arrancar el servidor."""
+    """Inicializa el vector store y el agente de forma segura al arrancar el servidor."""
     logger.info("Iniciando servidor del Agente RAG SEGA...")
     try:
-        vsm.initialize()   
-        agente.initialize()  
+        await asyncio.to_thread(vsm.initialize) 
+        await agente.initialize() 
         logger.info("Servicio listo para recibir consultas")
     except Exception as e:
         logger.critical(f"Error crítico durante el arranque: {e}", exc_info=True)
         raise
     yield
-    logger.info("Servidor detenido correctamente")
+    logger.info("Deteniendo servidores y limpiando tareas en segundo plano...")
+    await agente.shutdown()
+    logger.info("Servidor detenido correctamente.")
 
 
 # ─────────────────────────────────────────────
@@ -62,11 +75,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:4200", 
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -78,7 +99,7 @@ class ChatRequest(BaseModel):
     pregunta: str = Field(
         ...,
         min_length=1,
-        max_length=1000,
+        max_length=500,
         description="Pregunta del usuario en lenguaje natural",
         examples=["¿Cómo puedo recuperar mi contraseña de SEGA?"],
     )
@@ -87,7 +108,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     respuesta: str = Field(description="Respuesta generada por el agente")
     fuentes: list[str] = Field(description="Documentos utilizados para responder")
-
+    session_id: str = Field(description="ID de sesión — guardalo para mantener el hilo de la conversación")
 
 class HealthResponse(BaseModel):
     estado: str
@@ -100,6 +121,17 @@ class ResetResponse(BaseModel):
     exito: bool
     mensaje: str
 
+def _validar_o_generar_session_id(x_session_id: str | None) -> str:
+    """Valida que el session_id sea un UUID válido; genera uno nuevo si falta o es inválido."""
+    if x_session_id is None:
+        return str(uuid.uuid4())
+    try:
+        uuid.UUID(x_session_id)
+        return x_session_id
+    except ValueError:
+        logger.warning(f"session_id inválido recibido, generando uno nuevo.")
+        return str(uuid.uuid4())
+ 
 
 # ─────────────────────────────────────────────
 # Endpoints
@@ -113,13 +145,14 @@ class ResetResponse(BaseModel):
 )
 async def health_check():
     """Verifica que el vector store y el agente estén operativos."""
+    agente_listo = agente.is_ready
     return HealthResponse(
-        estado="activo" if agente.is_ready else "iniciando",
+        estado="activo" if agente_listo else "iniciando",
         vector_store_listo=vsm.is_ready,
-        agente_listo=agente.is_ready,
+        agente_listo=agente_listo,
         mensaje=(
             "Servicio completamente operativo"
-            if agente.is_ready
+            if agente_listo
             else "El servicio está iniciando, espera un momento"
         ),
     )
@@ -131,19 +164,24 @@ async def health_check():
     summary="Enviar pregunta al agente",
     tags=["Chat"],
 )
-async def chat(request: ChatRequest):
+@limiter.limit("15/minute")
+async def chat(
+    request: Request,
+    chat_request: ChatRequest,
+    x_session_id: str | None = Header(None, description="ID único de sesión (UUID). Si no se envía, se genera uno nuevo."),
+):
     """
-    Envía una pregunta al agente RAG y recibe una respuesta en español
-    basada en la documentación de soporte técnico de SEGA.
+    Envía una pregunta al agente RAG vinculada a una sesión específica.
+    Evita la fuga de historiales entre diferentes usuarios.
     """
     if not agente.is_ready:
         raise HTTPException(
             status_code=503,
             detail="El agente todavía está inicializando. Intenta en unos segundos.",
         )
-
-    resultado = agente.chat(request.pregunta)
-    return ChatResponse(**resultado)
+    session_id = _validar_o_generar_session_id(x_session_id)
+    resultado = await agente.chat(pregunta=chat_request.pregunta, session_id=session_id)
+    return ChatResponse(session_id=session_id, **resultado)
 
 
 @app.post(
@@ -152,12 +190,18 @@ async def chat(request: ChatRequest):
     summary="Limpiar historial de conversación",
     tags=["Chat"],
 )
-async def reset_chat():
+async def reset_chat(x_session_id: str = Header(..., description="ID único de la sesión que se desea limpiar (UUID)")):
     """Reinicia el historial de conversación del agente (nueva sesión)."""
-    agente.reset_historial()
+
+    try:
+        uuid.UUID(x_session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="session_id inválido, debe ser un UUID.")
+
+    await agente.reset_historial(session_id=x_session_id)
     return ResetResponse(
         exito=True,
-        mensaje="Historial de conversación limpiado correctamente",
+        mensaje=f"Historial de la sesión {x_session_id} limpiado correctamente.",
     )
 
 
@@ -167,18 +211,28 @@ async def reset_chat():
     summary="Regenerar índice FAISS",
     tags=["Sistema"],
 )
-async def reset_index():
+@limiter.limit("3/hour")
+async def reset_index(
+    request: Request,
+    x_admin_token: str = Header(..., description="Token de autenticación de administrador")):
     """
-    Regenera el índice FAISS leyendo nuevamente los PDFs de la carpeta
-    Documentacion/. Útil si se actualizan los documentos.
+    Regenera el índice FAISS leyendo los PDFs del almacenamiento. 
+    Protegido contra llamadas maliciosas de denegación de servicio (DoS).
     """
+
+    if not secrets.compare_digest(x_admin_token, ADMIN_TOKEN):
+        raise HTTPException(
+            status_code=403, 
+            detail="No tienes los permisos necesarios para realizar esta operación."
+        )
+
     try:
         logger.info("Regenerando índice FAISS por solicitud del usuario...")
-        vsm.build_index()
-        agente.reset_historial()
+        await asyncio.to_thread(vsm.build_index)
+        
         return ResetResponse(
             exito=True,
-            mensaje="Índice regenerado correctamente. El agente está listo.",
+            mensaje="Índice FAISS regenerado correctamente en disco.",
         )
     except Exception as e:
         logger.error(f"Error regenerando índice: {e}", exc_info=True)
