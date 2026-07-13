@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
-import { catchError } from 'rxjs/operators';
+import { catchError, tap } from 'rxjs/operators';
 
 // ─────────────────────────────────────────────
 // Interfaces que reflejan los modelos de FastAPI
@@ -13,6 +13,7 @@ export interface ChatRequest {
 export interface ChatResponse {
   respuesta: string;
   fuentes: string[];
+  session_id: string;
 }
 
 export interface HealthResponse {
@@ -33,15 +34,29 @@ export interface ResetResponse {
 export class ChatService {
   private readonly apiUrl = 'http://localhost:8000';
   private readonly http = inject(HttpClient);
+  private sessionId: string | null = null;
 
   /**
    * Envía una pregunta al agente RAG y recibe la respuesta con fuentes.
    */
   enviarPregunta(pregunta: string): Observable<ChatResponse> {
     const body: ChatRequest = { pregunta };
+    
+    let headers = new HttpHeaders();
+    if (this.sessionId) {
+      headers = headers.set('x-session-id', this.sessionId);
+    }
+
     return this.http
-      .post<ChatResponse>(`${this.apiUrl}/chat`, body)
-      .pipe(catchError(this.handleError));
+      .post<ChatResponse>(`${this.apiUrl}/chat`, body, { headers })
+      .pipe(
+        tap((res) => {
+          if (res.session_id) {
+            this.sessionId = res.session_id;
+          }
+        }),
+        catchError(this.handleError.bind(this))
+      );
   }
 
   /**
@@ -57,9 +72,22 @@ export class ChatService {
    * Reinicia el historial de conversación en el backend.
    */
   reiniciarChat(): Observable<ResetResponse> {
+    if (!this.sessionId) {
+      return new Observable<ResetResponse>(subscriber => {
+        subscriber.next({ exito: true, mensaje: 'No hay sesión activa.' });
+        subscriber.complete();
+      });
+    }
+
+    const headers = new HttpHeaders().set('x-session-id', this.sessionId);
     return this.http
-      .post<ResetResponse>(`${this.apiUrl}/reset-chat`, {})
-      .pipe(catchError(this.handleError));
+      .post<ResetResponse>(`${this.apiUrl}/reset-chat`, {}, { headers })
+      .pipe(
+        tap(() => {
+          this.sessionId = null;
+        }),
+        catchError(this.handleError.bind(this))
+      );
   }
 
   // ─────────────────────────────────────────────
