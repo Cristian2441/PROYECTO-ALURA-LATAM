@@ -1,8 +1,6 @@
 import logging
-#import json
 from typing import List, TypedDict, Dict
 import time
-#import threading
 import asyncio
 
 
@@ -11,7 +9,6 @@ from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-#from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.config import (
@@ -19,7 +16,6 @@ from app.config import (
     LLM_MODEL,
     LLM_TEMPERATURE,
     LLM_MAX_TOKENS,
-    HISTORY_FILE_PATH,
 )
 from app.prompts import ERROR_MESSAGE, NO_CONTEXT_MESSAGE
 from app.vectorStore import VectorStoreManager
@@ -51,12 +47,8 @@ class AgenteRAG:
     1. El usuario envía una pregunta
     2. El retriever busca los fragmentos más relevantes en FAISS
     3. Se construye el prompt con el contexto recuperado + historial
-    4. Gemini 1.5 Pro genera la respuesta en español
+    4. Gemini genera la respuesta en español
     5. Se devuelve la respuesta con las fuentes utilizadas
-    Evita el uso excesivo de formato markdown.** No uses negritas (**texto**) 
-en exceso ni anidés múltiples niveles de listas. Preferí oraciones claras y, 
-cuando haya pasos, una lista simple con números, sin sub-viñetas dentro de 
-cada paso.
 
     Nota de escalabilidad: el historial vive en memoria del proceso (Dict).
     Si el servicio corre con múltiples workers (Gunicorn/Uvicorn con --workers > 1)
@@ -91,30 +83,34 @@ cada paso.
         self._prompt = ChatPromptTemplate.from_messages([
             (
                 "system",
-                """Eres un asistente virtual especializado en soporte técnico de SEGA.
-                    Tu función es ayudar a los usuarios respondiendo sus preguntas basándote ÚNICAMENTE
-                    en la documentación oficial de SEGA que tienes disponible.
-                    
-                    ## Reglas que DEBES seguir:
-                    
-                    1. **Solo usa la información del contexto proporcionado.** No inventes respuestas
-                    ni uses conocimiento externo.
-                    
-                    2. **Si el contexto está vacío o no contiene información relevante para la pregunta**,
-                    responde INMEDIATAMENTE y únicamente con:
-                    "Lo siento, no encontré información sobre eso en la documentación de soporte
-                    de SEGA. Te recomiendo contactar directamente al equipo de soporte oficial."
-                    No intentes completar la respuesta con conocimiento propio en ese caso.
-                    
-                    3. **Responde siempre en español**, de forma clara, amable y profesional.
-                    
-                    4. **Sé conciso pero completo.** Si hay pasos a seguir, enuméralos claramente.
-                    
-                    5. **No menciones que eres una IA** ni que estás "consultando documentos".
-                    Responde de manera natural como un agente de soporte.
-                    
-                    ## Contexto de los documentos:
-                    {context}""",
+        """Eres un asistente virtual especializado en soporte técnico de SEGA.
+            Tu función es ayudar a los usuarios respondiendo sus preguntas basándote ÚNICAMENTE
+            en la documentación oficial de SEGA que tienes disponible.
+            
+            ## Reglas que DEBES seguir:
+            
+            1. **Solo usa la información del contexto proporcionado.** No inventes respuestas
+            ni uses conocimiento externo.
+            
+            2. **Si el contexto está vacío o no contiene información relevante para la pregunta**,
+            responde INMEDIATAMENTE y únicamente con:
+            "Lo siento, no encontré información sobre eso en la documentación de soporte
+            de SEGA. Te recomiendo contactar directamente al equipo de soporte oficial."
+            No intentes completar la respuesta con conocimiento propio en ese caso.
+            
+            3. **Responde siempre en español**, de forma clara, amable y profesional.
+            
+            4. **Sé conciso pero completo.** Si hay pasos a seguir, enuméralos claramente.
+            
+            5. **No menciones que eres una IA** ni que estás "consultando documentos".
+            Responde de manera natural como un agente de soporte.
+
+            6. **Evita el uso excesivo de formato markdown.** No uses negritas en exceso
+            ni anidés múltiples niveles de listas. Preferí oraciones claras y, cuando
+            haya pasos, una lista simple con números, sin sub-viñetas dentro de cada paso.
+            
+            ## Contexto de los documentos:
+            {context}""",
             ),
             MessagesPlaceholder(variable_name="historial"),
             ("human", "{pregunta}"),
@@ -151,34 +147,36 @@ cada paso.
 
     async def _save_session_historial(self, session_id: str, pregunta: str, respuesta: str) -> None:
         """Guarda la interacción en la sesión y recorta el exceso de memoria de forma segura."""
-        if self._cleanup_lock is not None:
-            async with self._cleanup_lock:
-                if session_id not in self._historiales:
-                    self._historiales[session_id] = {"messages": [], "last_access": time.time()}
+        async with self._cleanup_lock:
+            if session_id not in self._historiales:
+                self._historiales[session_id] = {"messages": [], "last_access": time.time()}
 
-                session = self._historiales[session_id]
-                session["messages"].append(HumanMessage(content=pregunta))
-                session["messages"].append(AIMessage(content=respuesta))
-                session["last_access"] = time.time()
+            session = self._historiales[session_id]
+            session["messages"].append(HumanMessage(content=pregunta))
+            session["messages"].append(AIMessage(content=respuesta))
+            session["last_access"] = time.time()
             
-                if len(session["messages"]) > MAX_HISTORY_TURNS * 2:
-                    session["messages"] = session["messages"][-MAX_HISTORY_TURNS * 2:]
+            if len(session["messages"]) > MAX_HISTORY_TURNS * 2:
+                session["messages"] = session["messages"][-MAX_HISTORY_TURNS * 2:]
 
     def _start_background_cleanup(self) -> None:
         """Lanza un demonio que limpia la RAM de forma asíncrona cada cierto intervalo."""
         async def cleanup_loop():
             while True:
                 await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
-                ahora = time.time()
-                async with self._cleanup_lock:
-                    expiradas = [
-                        sid for sid, data in self._historiales.items()
-                        if ahora - data["last_access"] > SESSION_TTL_SECONDS
-                    ]
-                    for sid in expiradas:
-                        del self._historiales[sid]
-                if expiradas:
-                    logger.info(f"Recolector de basura: {len(expiradas)} sesiones inactivas eliminadas de la RAM.")
+                try:
+                    ahora = time.time()
+                    async with self._cleanup_lock:
+                        expiradas = [
+                            sid for sid, data in self._historiales.items()
+                            if ahora - data["last_access"] > SESSION_TTL_SECONDS
+                        ]
+                        for sid in expiradas:
+                            del self._historiales[sid]
+                    if expiradas:
+                        logger.info(f"Recolector de basura: {len(expiradas)} sesiones inactivas eliminadas de la RAM.")
+                except Exception as e:
+                    logger.error(f"Error en el ciclo de limpieza de sesiones: {e}", exc_info=True)
 
         self._cleanup_task = asyncio.create_task(cleanup_loop())
 
@@ -233,10 +231,10 @@ cada paso.
 
             await self._save_session_historial(session_id, pregunta, respuesta)
 
-            fuentes = list({
+            fuentes = list(dict.fromkeys(
                 doc.metadata.get("fuente", "Documento desconocido")
                 for doc in docs
-            })
+            ))
 
             return {"respuesta": respuesta, "fuentes": fuentes}
 
@@ -257,7 +255,6 @@ cada paso.
         """Borra explícitamente una sesión de memoria usando exclusión mutua."""
         async with self._cleanup_lock:
             if session_id in self._historiales:
-                self._historiales[session_id]["messages"].clear()
                 del self._historiales[session_id]
                 logger.info(f"Historial de la sesión {session_id} reiniciado")
 
