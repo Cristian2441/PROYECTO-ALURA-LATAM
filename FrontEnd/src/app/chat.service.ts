@@ -36,12 +36,10 @@ export class ChatService {
   private readonly http = inject(HttpClient);
   private sessionId: string | null = null;
 
-  /**
-   * Envía una pregunta al agente RAG y recibe la respuesta con fuentes.
-   */
+
   enviarPregunta(pregunta: string): Observable<ChatResponse> {
     const body: ChatRequest = { pregunta };
-    
+
     let headers = new HttpHeaders();
     if (this.sessionId) {
       headers = headers.set('x-session-id', this.sessionId);
@@ -59,18 +57,14 @@ export class ChatService {
       );
   }
 
-  /**
-   * Verifica que el backend esté operativo.
-   */
+
   verificarSalud(): Observable<HealthResponse> {
     return this.http
       .get<HealthResponse>(`${this.apiUrl}/health`)
       .pipe(catchError(this.handleError));
   }
 
-  /**
-   * Reinicia el historial de conversación en el backend.
-   */
+
   reiniciarChat(): Observable<ResetResponse> {
     if (!this.sessionId) {
       return new Observable<ResetResponse>(subscriber => {

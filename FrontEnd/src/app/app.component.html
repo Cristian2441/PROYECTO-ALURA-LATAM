@@ -34,11 +34,9 @@
   @if (viewState() === 'chat') {
     <div class="chat-view" id="chat-section">
 
-      <!-- Zona de mensajes (sin header) -->
       <div class="messages-area" id="messages-area" role="log" aria-live="polite">
 
         @for (msg of mensajes(); track $index) {
-          <!-- Mensaje del USUARIO -->
           @if (msg.rol === 'user') {
             <div class="message message--user">
               <div class="bubble bubble--user">
@@ -47,16 +45,13 @@
             </div>
           }
 
-          <!-- Mensaje del ASISTENTE -->
           @if (msg.rol === 'assistant') {
             <div class="message message--assistant">
-              <!-- Avatar -->
               <div class="avatar" aria-hidden="true">
                 <img src="SEGA-logo.png" alt="" class="avatar-img" />
               </div>
 
               <div class="assistant-block">
-                <!-- Burbuja de respuesta -->
                 <div class="bubble bubble--assistant" [class.bubble--error]="msg.error">
                   {{ msg.contenido }}
                 </div>
@@ -65,7 +60,6 @@
           }
         }
 
-        <!-- Indicador de escritura (loading) -->
         @if (isLoading()) {
           <div class="message message--assistant" id="typing-indicator">
             <div class="avatar" aria-hidden="true">
@@ -79,7 +73,7 @@
           </div>
         }
 
-        <!-- Ancla para auto-scroll -->
+
         <div #messagesEnd></div>
       </div>
     </div>
@@ -91,7 +85,7 @@
   <footer class="input-area">
     <div class="input-container" [class.input-container--loading]="isLoading()">
 
-      <!-- Botón nueva conversación (+) -->
+
       @if (viewState() === 'chat') {
         <button
           class="new-chat-icon-btn"
