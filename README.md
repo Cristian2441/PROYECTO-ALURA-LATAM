@@ -1,4 +1,4 @@
-# 🎮 SEGA Assistant
+#  SEGA Assistant
 
 Asistente de soporte técnico conversacional para SEGA, desarrollado como proyecto del programa **Oracle Next Education + Alura Latam**. Permite a los usuarios hacer preguntas en lenguaje natural sobre cuentas, problemas técnicos y preparación para soporte, obteniendo respuestas basadas exclusivamente en la documentación oficial de SEGA.
 
@@ -9,7 +9,7 @@ El sistema está compuesto por dos partes independientes que trabajan juntas:
 
 ---
 
-## 📋 Tabla de Contenidos
+##  Tabla de Contenidos
 
 - [Arquitectura General](#arquitectura-general)
 - [Stack Tecnológico](#stack-tecnológico)
