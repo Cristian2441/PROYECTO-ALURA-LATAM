@@ -32,7 +32,7 @@ export interface ResetResponse {
   providedIn: 'root',
 })
 export class ChatService {
-  private readonly apiUrl = 'http://localhost:8000';
+  private readonly apiUrl = 'https://proyecto-alura-latam.onrender.com';
   private readonly http = inject(HttpClient);
   private sessionId: string | null = null;
 
