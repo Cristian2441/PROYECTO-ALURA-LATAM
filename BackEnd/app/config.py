@@ -46,7 +46,7 @@ if not ADMIN_TOKEN:
 # Modelos de Google Gemini
 # ─────────────────────────────────────────────
 
-LLM_MODEL = "gemini-2.5-flash"
+LLM_MODEL = "gemini-3.5-flash"
 EMBEDDING_MODEL = "models/gemini-embedding-001"
 
 # ─────────────────────────────────────────────
