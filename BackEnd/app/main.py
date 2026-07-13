@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 import secrets
 import uuid
+import os
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Header, Request
@@ -81,7 +82,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:4200", 
-]
+] + [o for o in os.getenv("EXTRA_CORS_ORIGINS", "").split(",") if o]
 
 app.add_middleware(
     CORSMiddleware,
