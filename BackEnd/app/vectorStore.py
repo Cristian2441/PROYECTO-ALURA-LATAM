@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 from typing import List
+import threading
 
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -37,7 +38,7 @@ class VectorStoreManager:
             google_api_key=GEMINI_API_KEY,
         )
         self._vector_store: FAISS | None = None
-
+        self._lock = threading.Lock() 
     # ─────────────────────────────────────────────
     # Carga de documentos PDF
     # ─────────────────────────────────────────────
@@ -73,16 +74,30 @@ class VectorStoreManager:
         """
         logger.info("Construyendo índice FAISS desde cero...")
 
-        documents = self.load_documents()
-        chunks = self._split_documents(documents)
+        try:
+            documents = self.load_documents()
+            chunks = self._split_documents(documents)
+            chunks = [ c for c in chunks if c.page_content.strip() ]
 
-        logger.info("Generando embeddings con Google text-embedding-004...")
-        self._vector_store = FAISS.from_documents(chunks, self._embeddings)
+            if not chunks:
+                raise ValueError(
+                    f"No se generaron fragmentos de texto válidos. "
+                    f"Verifica que existan PDFs con texto legible en: {DOCS_DIR}"
+                )
 
-        Path(FAISS_INDEX_PATH).mkdir(parents=True, exist_ok=True)
-        self._vector_store.save_local(str(FAISS_INDEX_PATH))
+            logger.info("Generando embeddings con Google text-embedding-004...")
+            nuevo_vector_store = FAISS.from_documents(chunks, self._embeddings)
 
-        logger.info(f"Índice FAISS guardado en: {FAISS_INDEX_PATH}")
+            Path(FAISS_INDEX_PATH).mkdir(parents=True, exist_ok=True)
+            nuevo_vector_store.save_local(str(FAISS_INDEX_PATH))
+
+            with self._lock:   
+                self._vector_store = nuevo_vector_store
+
+            logger.info(f"Índice FAISS guardado en: {FAISS_INDEX_PATH}")
+        except Exception as e:
+            logger.error(f"Error crítico construyendo el índice FAISS: {e}", exc_info=True)
+            raise
 
     # ─────────────────────────────────────────────
     # Carga del índice existente
@@ -99,15 +114,19 @@ class VectorStoreManager:
             return False
 
         try:
-            self._vector_store = FAISS.load_local(
+            instancia_local = FAISS.load_local(
                 str(FAISS_INDEX_PATH),
                 self._embeddings,
                 allow_dangerous_deserialization=True,
             )
-            logger.info(f"Índice FAISS cargado desde: {FAISS_INDEX_PATH}")
+            
+            with self._lock:   # ← Protegemos la mutación de la propiedad global
+                self._vector_store = instancia_local
+                
+            logger.info(f"Índice FAISS cargado correctamente desde: {FAISS_INDEX_PATH}")
             return True
         except Exception as e:
-            logger.error(f"Error cargando índice FAISS: {e}")
+            logger.error(f"Error cargando índice FAISS (posible archivo corrupto): {e}")
             return False
 
     # ─────────────────────────────────────────────
@@ -127,15 +146,17 @@ class VectorStoreManager:
     # ─────────────────────────────────────────────
     def get_retriever(self):
         """Devuelve el retriever de LangChain configurado con TOP_K_RESULTS."""
-        if self._vector_store is None:
-            raise RuntimeError(
-                "El vector store no está inicializado. "
-                "Llama a initialize() primero."
+        
+        with self._lock:
+            if self._vector_store is None:
+                raise RuntimeError(
+                    "El vector store no está inicializado. "
+                    "Llama a initialize() primero antes de solicitar el retriever."
+                )
+            return self._vector_store.as_retriever(
+                search_type="similarity",
+                search_kwargs={"k": TOP_K_RESULTS},
             )
-        return self._vector_store.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": TOP_K_RESULTS},
-        )
 
     @property
     def is_ready(self) -> bool:
