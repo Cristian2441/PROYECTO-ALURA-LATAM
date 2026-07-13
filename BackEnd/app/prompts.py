@@ -47,7 +47,7 @@ en la documentación oficial de SEGA que tienes disponible.
 # Mensaje de bienvenida
 # ─────────────────────────────────────────────
 WELCOME_MESSAGE = (
-    "¡Hola! 👋 Soy el asistente de soporte técnico de SEGA. "
+    "¡Hola!  Soy el asistente de soporte técnico de SEGA. "
     "Estoy aquí para ayudarte con cualquier duda sobre tus cuentas, "
     "juegos o problemas técnicos. ¿En qué puedo ayudarte hoy?"
 )
@@ -63,7 +63,7 @@ ERROR_MESSAGE = (
 # ─────────────────────────────────────────────
 # Respuesta cuando no hay información
 # ─────────────────────────────────────────────
-NO_INFO_MESSAGE = (
+NO_CONTEXT_MESSAGE = (
     "Lo siento, no encontré información sobre eso en la documentación de soporte "
     "de SEGA. Te recomiendo contactar directamente al equipo de soporte oficial "
     "en https://www.sega.com/support"
