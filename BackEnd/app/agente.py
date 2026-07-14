@@ -63,7 +63,8 @@ class AgenteRAG:
         self._prompt: ChatPromptTemplate | None = None
         self._historiales: Dict[str, SessionData] = {}
         self._initialized = False
-        self._cleanup_lock = asyncio.Lock()
+        self._session_lock = asyncio.Lock()   # Protege lectura/escritura de historiales
+        self._cleanup_lock = asyncio.Lock()   # Protege el ciclo de limpieza en background
         self._cleanup_task: asyncio.Task | None = None
 
     # ─────────────────────────────────────────────
@@ -147,16 +148,16 @@ class AgenteRAG:
 
     async def _get_session_history(self, session_id: str) -> List:
         """Obtiene y limita el historial específico de una sesión."""
-        async with self._cleanup_lock:
+        async with self._session_lock:
             if session_id not in self._historiales:
                 self._historiales[session_id] = {"messages": [], "last_access": time.time()}
                 
             self._historiales[session_id]["last_access"] = time.time()
-            return self._historiales[session_id]["messages"][-MAX_HISTORY_TURNS * 2:]
+            return list(self._historiales[session_id]["messages"][-MAX_HISTORY_TURNS * 2:])
 
     async def _save_session_historial(self, session_id: str, pregunta: str, respuesta: str) -> None:
         """Guarda la interacción en la sesión y recorta el exceso de memoria de forma segura."""
-        async with self._cleanup_lock:
+        async with self._session_lock:
             if session_id not in self._historiales:
                 self._historiales[session_id] = {"messages": [], "last_access": time.time()}
 
@@ -175,7 +176,7 @@ class AgenteRAG:
                 await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
                 try:
                     ahora = time.time()
-                    async with self._cleanup_lock:
+                    async with self._session_lock:
                         expiradas = [
                             sid for sid, data in self._historiales.items()
                             if ahora - data["last_access"] > SESSION_TTL_SECONDS
@@ -222,7 +223,9 @@ class AgenteRAG:
             logger.info(f"Procesando pregunta: {pregunta[:50]}...")
 
             retriever = self._vsm.get_retriever()
-            docs = await retriever.ainvoke(pregunta)
+            # FAISS es CPU-bound: lo corremos en un thread para no bloquear
+            # el event loop cuando haya múltiples usuarios simultáneos.
+            docs = await asyncio.to_thread(retriever.invoke, pregunta)
 
             if not docs:
                 # No hay documentos: igual llamamos al LLM para que maneje saludos
@@ -265,7 +268,7 @@ class AgenteRAG:
     # ─────────────────────────────────────────────
     async def reset_historial(self, session_id: str) -> None:
         """Borra explícitamente una sesión de memoria usando exclusión mutua."""
-        async with self._cleanup_lock:
+        async with self._session_lock:
             if session_id in self._historiales:
                 del self._historiales[session_id]
                 logger.info(f"Historial de la sesión {session_id} reiniciado")

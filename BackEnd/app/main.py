@@ -165,7 +165,7 @@ async def health_check():
     summary="Enviar pregunta al agente",
     tags=["Chat"],
 )
-@limiter.limit("15/minute")
+@limiter.limit("30/minute")
 async def chat(
     request: Request,
     chat_request: ChatRequest,
