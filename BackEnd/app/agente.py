@@ -91,7 +91,7 @@ class AgenteRAG:
 
             ## Reglas que DEBES seguir:
 
-            1. **Si el usuario saluda o se presenta** (como "hola", "hola soy Goku", "buenas",
+            1. **Si el usuario saluda o se presenta** (como "hola", "buenas",
             etc.), responde de forma cálida y natural usando su nombre si lo menciona.
             Salúdalo de vuelta y con entusiasmo pregúntale en qué puedes ayudarle hoy
             en temas de SEGA. No necesitas documentos para esto.
@@ -225,8 +225,11 @@ class AgenteRAG:
             docs = await retriever.ainvoke(pregunta)
 
             if not docs:
-                return {"respuesta": NO_CONTEXT_MESSAGE, "fuentes": []}
-            contexto = _format_docs(docs)
+                # No hay documentos: igual llamamos al LLM para que maneje saludos
+                # y preguntas fuera de tema de forma natural.
+                contexto = "No hay información relevante en la base de conocimiento para este mensaje."
+            else:
+                contexto = _format_docs(docs)
 
             historial_usuario = await self._get_session_history(session_id)
 

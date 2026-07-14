@@ -37,7 +37,7 @@ export class ChatService {
   private sessionId: string | null = null;
 
 
-  enviarPregunta(pregunta: string): Observable<ChatResponse> {
+  enviarPregunta(pregunta: string, reintentos = 2): Observable<ChatResponse> {
     const body: ChatRequest = { pregunta };
 
     let headers = new HttpHeaders();
@@ -53,7 +53,18 @@ export class ChatService {
             this.sessionId = res.session_id;
           }
         }),
-        catchError(this.handleError.bind(this))
+        catchError((error: HttpErrorResponse) => {
+          // Si el servidor está despertando (503 o sin conexión), reintentamos una vez
+          const estaDespertando = error.status === 0 || error.status === 503;
+          if (reintentos > 0 && estaDespertando) {
+            return new Observable<ChatResponse>(subscriber => {
+              setTimeout(() => {
+                this.enviarPregunta(pregunta, reintentos - 1).subscribe(subscriber);
+              }, 4000); // Espera 4 segundos antes de reintentar
+            });
+          }
+          return this.handleError(error);
+        })
       );
   }
 
