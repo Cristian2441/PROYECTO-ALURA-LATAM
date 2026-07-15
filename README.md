@@ -6,7 +6,22 @@ El sistema está compuesto por dos partes independientes que trabajan juntas:
 
 - **BackEnd** — API de inteligencia artificial con un pipeline RAG (Python + FastAPI + Gemini + FAISS)
 - **FrontEnd** — Interfaz de chat web (Angular 22)
+  
+🔗 https://sega-front.onrender.com/
 
+
+Nota: al usar el plan gratuito de Render, el servicio puede tardar 20-30 segundos
+en responder la primera vez si estuvo inactivo (cold start). Las siguientes
+peticiones son instantáneas.
+
+
+
+Podés probar directamente:
+
+
+Chat: https://sega-front.onrender.com/
+Documentación interactiva (Swagger): https://sega-front.onrender.com/docs
+Estado del servicio: https://sega-front.onrender.com/health
 ---
 
 ##  Tabla de Contenidos
