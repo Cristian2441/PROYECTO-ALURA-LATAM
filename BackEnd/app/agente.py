@@ -223,13 +223,9 @@ class AgenteRAG:
             logger.info(f"Procesando pregunta: {pregunta[:50]}...")
 
             retriever = self._vsm.get_retriever()
-            # FAISS es CPU-bound: lo corremos en un thread para no bloquear
-            # el event loop cuando haya múltiples usuarios simultáneos.
             docs = await asyncio.to_thread(retriever.invoke, pregunta)
 
             if not docs:
-                # No hay documentos: igual llamamos al LLM para que maneje saludos
-                # y preguntas fuera de tema de forma natural.
                 contexto = "No hay información relevante en la base de conocimiento para este mensaje."
             else:
                 contexto = _format_docs(docs)
